@@ -27,6 +27,8 @@ def default_state():
         "day_start_balance": 0.0,
         "last_trade_at": {},
         "halt_reason": "",
+        "cycle_count": 0,
+        "last_position_signature": "",
     }
 
 

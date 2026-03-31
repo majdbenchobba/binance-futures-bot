@@ -39,5 +39,7 @@ KILL_SWITCH_FILE = os.getenv("KILL_SWITCH_FILE", "runtime/KILL_SWITCH")
 ALERT_BELL = os.getenv("ALERT_BELL", "false").lower() == "true"
 ALERT_WEBHOOK_URL = os.getenv("ALERT_WEBHOOK_URL", "").strip()
 ALERT_TIMEOUT_SECONDS = float(os.getenv("ALERT_TIMEOUT_SECONDS", "5"))
+REPORT_EVERY_CYCLES = int(os.getenv("REPORT_EVERY_CYCLES", "1"))
+ALERT_ON_POSITION_CHANGES = os.getenv("ALERT_ON_POSITION_CHANGES", "true").lower() == "true"
 LOOP_SLEEP_SECONDS = int(os.getenv("LOOP_SLEEP_SECONDS", "60"))
 LOG_FILE = os.getenv("LOG_FILE", "logs/bot.log")

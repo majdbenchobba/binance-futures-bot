@@ -15,6 +15,17 @@ from config import (
 from logger import setup_logger
 from data_utils import get_top_volatile_symbols
 from notifications import send_alert
+from reporting import (
+    build_account_snapshot,
+    build_alert_context,
+    build_position_signature,
+    format_cycle_summary,
+    format_position_lines,
+    increment_cycle_count,
+    remember_position_signature,
+    should_alert_on_position_change,
+    should_log_cycle_report,
+)
 from risk_controls import (
     can_open_new_trade,
     evaluate_runtime_guardrails,
@@ -159,6 +170,32 @@ def main():
                         context={"event": "reconcile_error", "symbol": symbol},
                         log_message=False,
                     )
+
+            cycle_count = increment_cycle_count(runtime_state)
+            account_snapshot = build_account_snapshot(client)
+            position_signature = build_position_signature(account_snapshot)
+            state_changed = should_alert_on_position_change(runtime_state, position_signature)
+
+            if should_log_cycle_report(runtime_state, state_changed):
+                logger.info(format_cycle_summary(account_snapshot, cycle_count))
+                for line in format_position_lines(account_snapshot):
+                    logger.info(line)
+
+            if state_changed:
+                position_lines = format_position_lines(account_snapshot)
+                if position_lines:
+                    message = f"Position state changed: {' | '.join(position_lines)}"
+                else:
+                    message = "Position state changed: account is flat."
+                send_alert(
+                    message,
+                    level="info",
+                    context=build_alert_context(account_snapshot, cycle_count),
+                    log_message=False,
+                )
+
+            remember_position_signature(runtime_state, position_signature)
+            save_runtime_state(runtime_state)
 
             if RUN_ONCE:
                 logger.info("RUN_ONCE enabled. Exiting after a single scan cycle.")

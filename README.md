@@ -10,6 +10,7 @@ It is set up for testnet use by default and now manages a fuller trade lifecycle
 - cleanup of stale protection orders when positions disappear
 - operator guardrails for cooldowns, daily loss limits, and a manual kill switch
 - optional webhook alerts plus continued management of open positions outside the top-volatility scan
+- cycle-by-cycle account snapshots with position and unrealized PnL reporting
 
 It is in a much better state for testnet verification, but it is still not something I would point at real money without more monitoring, reconciliation, and long-run burn-in.
 
@@ -85,6 +86,8 @@ KILL_SWITCH_FILE=runtime/KILL_SWITCH
 ALERT_BELL=false
 ALERT_WEBHOOK_URL=
 ALERT_TIMEOUT_SECONDS=5
+REPORT_EVERY_CYCLES=1
+ALERT_ON_POSITION_CHANGES=true
 ```
 
 What they do:
@@ -94,6 +97,8 @@ What they do:
 - `KILL_SWITCH_FILE` lets you stop the bot manually by creating that file
 - `STATE_FILE` stores the day-start balance and recent trade timestamps locally
 - `ALERT_WEBHOOK_URL` can receive JSON alerts for halts, live entries, and errors
+- `REPORT_EVERY_CYCLES` controls how often the bot logs a full account snapshot
+- `ALERT_ON_POSITION_CHANGES` sends a webhook when the live position state changes
 
 To stop the bot manually, create the kill-switch file:
 
@@ -122,6 +127,27 @@ If you set `ALERT_WEBHOOK_URL`, the bot will send JSON like this:
 ```
 
 That keeps the alerting generic, so you can forward it to your own endpoint, Discord bridge, Slack bridge, or any small notifier you control.
+
+## Runtime Reporting
+
+At the end of each cycle, the bot can log an account summary like:
+
+```text
+Cycle 12: wallet=4999.93 available=4975.10 uPnL=1.24 open_positions=1 protection_orders=2
+ETHUSDT SHORT qty=0.011000 entry=2097.2100 mark=2089.5500 uPnL=0.0839 lev=5x protections=2 liq=2487.8300
+```
+
+That gives you a quick read on:
+- wallet balance
+- available balance
+- total unrealized PnL
+- open position count
+- protection order count
+
+When `ALERT_ON_POSITION_CHANGES=true`, the bot also sends a webhook when the structural position state changes, such as:
+- flat -> open position
+- open position -> flat
+- protection count changes around an active position
 
 ## Coverage Outside The Scan List
 
