@@ -11,6 +11,7 @@ It is set up for testnet use by default and now manages a fuller trade lifecycle
 - operator guardrails for cooldowns, daily loss limits, and a manual kill switch
 - optional webhook alerts plus continued management of open positions outside the top-volatility scan
 - cycle-by-cycle account snapshots with position and unrealized PnL reporting
+- JSONL journaling plus a repeatable paper-run command for multi-cycle dry-run testing
 
 It is in a much better state for testnet verification, but it is still not something I would point at real money without more monitoring, reconciliation, and long-run burn-in.
 
@@ -88,6 +89,8 @@ ALERT_WEBHOOK_URL=
 ALERT_TIMEOUT_SECONDS=5
 REPORT_EVERY_CYCLES=1
 ALERT_ON_POSITION_CHANGES=true
+JOURNAL_ENABLED=true
+JOURNAL_FILE=runtime/journal.jsonl
 ```
 
 What they do:
@@ -99,6 +102,7 @@ What they do:
 - `ALERT_WEBHOOK_URL` can receive JSON alerts for halts, live entries, and errors
 - `REPORT_EVERY_CYCLES` controls how often the bot logs a full account snapshot
 - `ALERT_ON_POSITION_CHANGES` sends a webhook when the live position state changes
+- `JOURNAL_FILE` stores structured JSONL events for later review
 
 To stop the bot manually, create the kill-switch file:
 
@@ -149,6 +153,42 @@ When `ALERT_ON_POSITION_CHANGES=true`, the bot also sends a webhook when the str
 - open position -> flat
 - protection count changes around an active position
 
+## Journaling
+
+If `JOURNAL_ENABLED=true`, the bot appends JSONL entries to `JOURNAL_FILE` for:
+- cycle summaries
+- position state changes
+- live entries
+- halts
+- trade and reconciliation errors
+
+Example journal line:
+
+```json
+{"event":"cycle_summary","payload":{"cycle_count":3,"summary":"Cycle 3: wallet=4999.93 available=4995.10 uPnL=0.24 open_positions=1 protection_orders=2"}}
+```
+
+That gives you something easy to grep, archive, or load into a notebook later.
+
+## Paper Run
+
+For a short multi-cycle dry-run soak test:
+
+```bash
+python paper_run.py --cycles 5 --sleep-seconds 5 --symbol-allowlist ETHUSDT,BTCUSDT --max-symbol-scan 2
+```
+
+By default that:
+- keeps `DRY_RUN=true`
+- stays on testnet
+- writes journal entries to `runtime/paper-run.jsonl`
+- writes runtime state to `runtime/paper-run-state.json`
+
+Useful files after a paper run:
+- `runtime/paper-run.jsonl`
+- `runtime/paper-run-state.json`
+- `logs/bot.log`
+
 ## Coverage Outside The Scan List
 
 The bot still uses the top-volatility scan to decide where new entries are allowed.
@@ -185,6 +225,7 @@ That is still a testnet-only check. It is useful for verifying that entry, stop-
 - the bot now sizes market orders against Binance symbol filters instead of using a fixed decimal round
 - protective orders use Binance close-all conditional algo orders so they can be restored after a restart
 - runtime state is intentionally local-only and ignored by git
+- journal files are intentionally local-only and ignored by git through `runtime/`
 - alerts are optional; failed webhook delivery is logged but will not crash the bot
 - it expects one-way mode unless you explicitly change that behavior
 - if the old hardcoded keys were real, rotate them before publishing this repo

@@ -12,6 +12,7 @@ from config import (
     VOLATILITY_INTERVAL,
     VOLATILITY_LOOKBACK,
 )
+from journal import append_journal_entry
 from logger import setup_logger
 from data_utils import get_top_volatile_symbols
 from notifications import send_alert
@@ -68,7 +69,7 @@ def create_client(api_key, api_secret, use_testnet):
     return client
 
 
-def main():
+def main(max_cycles=None, sleep_seconds=None):
     for stream_name in ("stdout", "stderr"):
         stream = getattr(sys, stream_name, None)
         if stream and hasattr(stream, "reconfigure"):
@@ -88,6 +89,8 @@ def main():
 
     client = create_client(API_KEY, API_SECRET, USE_TESTNET)
     runtime_state = load_runtime_state()
+    completed_cycles = 0
+    effective_sleep_seconds = LOOP_SLEEP_SECONDS if sleep_seconds is None else sleep_seconds
 
     while True:
         try:
@@ -100,6 +103,10 @@ def main():
                     level="warning",
                     context={"event": "guardrail_halt", "wallet_balance": wallet_balance},
                     log_message=False,
+                )
+                append_journal_entry(
+                    "guardrail_halt",
+                    {"reason": halt_reason, "wallet_balance": wallet_balance},
                 )
                 logger.warning(f"Last known wallet balance: {wallet_balance:.2f} USDT")
                 break
@@ -142,6 +149,10 @@ def main():
                     if entered_position:
                         record_trade_opened(runtime_state, symbol)
                         save_runtime_state(runtime_state)
+                        append_journal_entry(
+                            "live_position_opened",
+                            {"symbol": symbol, "cycle_count": int(runtime_state.get("cycle_count") or 0) + 1},
+                        )
                         send_alert(
                             f"Opened live position on {symbol}",
                             level="info",
@@ -151,6 +162,10 @@ def main():
                 except Exception as e:
                     message = f"Error trading {symbol}: {e}"
                     logger.error(message)
+                    append_journal_entry(
+                        "trade_error",
+                        {"symbol": symbol, "message": message},
+                    )
                     send_alert(
                         message,
                         level="error",
@@ -164,6 +179,10 @@ def main():
                 except Exception as e:
                     message = f"Error reconciling orphan protection on {symbol}: {e}"
                     logger.error(message)
+                    append_journal_entry(
+                        "reconcile_error",
+                        {"symbol": symbol, "message": message},
+                    )
                     send_alert(
                         message,
                         level="error",
@@ -181,12 +200,31 @@ def main():
                 for line in format_position_lines(account_snapshot):
                     logger.info(line)
 
+            append_journal_entry(
+                "cycle_summary",
+                {
+                    "cycle_count": cycle_count,
+                    "summary": format_cycle_summary(account_snapshot, cycle_count),
+                    "trade_symbols": trade_symbols,
+                    "reconcile_only_symbols": reconcile_only_symbols,
+                    "snapshot": account_snapshot,
+                },
+            )
+
             if state_changed:
                 position_lines = format_position_lines(account_snapshot)
                 if position_lines:
                     message = f"Position state changed: {' | '.join(position_lines)}"
                 else:
                     message = "Position state changed: account is flat."
+                append_journal_entry(
+                    "position_state_changed",
+                    {
+                        "cycle_count": cycle_count,
+                        "snapshot": account_snapshot,
+                        "position_lines": position_lines,
+                    },
+                )
                 send_alert(
                     message,
                     level="info",
@@ -196,23 +234,28 @@ def main():
 
             remember_position_signature(runtime_state, position_signature)
             save_runtime_state(runtime_state)
+            completed_cycles += 1
 
             if RUN_ONCE:
                 logger.info("RUN_ONCE enabled. Exiting after a single scan cycle.")
                 break
+            if max_cycles is not None and completed_cycles >= max_cycles:
+                logger.info(f"Reached requested cycle limit ({max_cycles}). Exiting.")
+                break
 
-            time.sleep(LOOP_SLEEP_SECONDS)
+            time.sleep(effective_sleep_seconds)
 
         except Exception as e:
             message = f"Error in main loop: {e}"
             logger.error(message)
+            append_journal_entry("main_loop_error", {"message": message})
             send_alert(
                 message,
                 level="error",
                 context={"event": "main_loop_error"},
                 log_message=False,
             )
-            time.sleep(LOOP_SLEEP_SECONDS)
+            time.sleep(effective_sleep_seconds)
 
 
 if __name__ == "__main__":

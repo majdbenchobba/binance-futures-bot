@@ -41,5 +41,7 @@ ALERT_WEBHOOK_URL = os.getenv("ALERT_WEBHOOK_URL", "").strip()
 ALERT_TIMEOUT_SECONDS = float(os.getenv("ALERT_TIMEOUT_SECONDS", "5"))
 REPORT_EVERY_CYCLES = int(os.getenv("REPORT_EVERY_CYCLES", "1"))
 ALERT_ON_POSITION_CHANGES = os.getenv("ALERT_ON_POSITION_CHANGES", "true").lower() == "true"
+JOURNAL_ENABLED = os.getenv("JOURNAL_ENABLED", "true").lower() == "true"
+JOURNAL_FILE = os.getenv("JOURNAL_FILE", "runtime/journal.jsonl")
 LOOP_SLEEP_SECONDS = int(os.getenv("LOOP_SLEEP_SECONDS", "60"))
 LOG_FILE = os.getenv("LOG_FILE", "logs/bot.log")
