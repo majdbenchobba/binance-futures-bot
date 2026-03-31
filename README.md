@@ -8,6 +8,7 @@ It is set up for testnet use by default and now manages a fuller trade lifecycle
 - optional symbol allowlist for faster testing
 - automatic stop-loss and take-profit protection after entry via Binance conditional algo orders
 - cleanup of stale protection orders when positions disappear
+- operator guardrails for cooldowns, daily loss limits, and a manual kill switch
 
 It is in a much better state for testnet verification, but it is still not something I would point at real money without more monitoring, reconciliation, and long-run burn-in.
 
@@ -70,6 +71,35 @@ On a filled short, it mirrors those levels above and below entry.
 
 If a position exists but the matching protection orders are missing, the bot will recreate them on the next loop.
 
+## Operator safety settings
+
+These controls are aimed at keeping the bot from blindly stacking trades:
+
+```env
+MAX_OPEN_POSITIONS=1
+SYMBOL_COOLDOWN_MINUTES=30
+MAX_DAILY_LOSS_PCT=0.03
+STATE_FILE=runtime/state.json
+KILL_SWITCH_FILE=runtime/KILL_SWITCH
+ALERT_BELL=false
+```
+
+What they do:
+- `MAX_OPEN_POSITIONS` limits how many non-flat symbols the bot can hold at once
+- `SYMBOL_COOLDOWN_MINUTES` blocks a fresh re-entry on the same symbol for a while after a live fill
+- `MAX_DAILY_LOSS_PCT` stops the bot if the wallet balance falls below the configured day-start threshold
+- `KILL_SWITCH_FILE` lets you stop the bot manually by creating that file
+- `STATE_FILE` stores the day-start balance and recent trade timestamps locally
+
+To stop the bot manually, create the kill-switch file:
+
+```powershell
+New-Item -ItemType Directory -Force -Path runtime | Out-Null
+New-Item -ItemType File -Force -Path runtime\KILL_SWITCH | Out-Null
+```
+
+Delete that file when you want to allow trading again.
+
 ## Safe live testnet pass
 
 If you want to test actual order placement on Binance Futures testnet, keep the size small and run one cycle:
@@ -96,5 +126,6 @@ That is still a testnet-only check. It is useful for verifying that entry, stop-
 - `MAX_SYMBOL_SCAN` can limit how many perpetual symbols get scanned in one pass
 - the bot now sizes market orders against Binance symbol filters instead of using a fixed decimal round
 - protective orders use Binance close-all conditional algo orders so they can be restored after a restart
+- runtime state is intentionally local-only and ignored by git
 - it expects one-way mode unless you explicitly change that behavior
 - if the old hardcoded keys were real, rotate them before publishing this repo

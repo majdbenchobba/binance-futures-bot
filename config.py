@@ -31,5 +31,11 @@ MAX_SYMBOL_SCAN = int(os.getenv("MAX_SYMBOL_SCAN", "0"))
 TRADE_BALANCE_FRACTION = float(os.getenv("TRADE_BALANCE_FRACTION", "0.01"))
 ORDER_RECV_WINDOW = int(os.getenv("ORDER_RECV_WINDOW", "5000"))
 REQUIRE_ONE_WAY_MODE = os.getenv("REQUIRE_ONE_WAY_MODE", "true").lower() == "true"
+MAX_OPEN_POSITIONS = int(os.getenv("MAX_OPEN_POSITIONS", "1"))
+SYMBOL_COOLDOWN_MINUTES = int(os.getenv("SYMBOL_COOLDOWN_MINUTES", "30"))
+MAX_DAILY_LOSS_PCT = float(os.getenv("MAX_DAILY_LOSS_PCT", "0.03"))
+STATE_FILE = os.getenv("STATE_FILE", "runtime/state.json")
+KILL_SWITCH_FILE = os.getenv("KILL_SWITCH_FILE", "runtime/KILL_SWITCH")
+ALERT_BELL = os.getenv("ALERT_BELL", "false").lower() == "true"
 LOOP_SLEEP_SECONDS = int(os.getenv("LOOP_SLEEP_SECONDS", "60"))
 LOG_FILE = os.getenv("LOG_FILE", "logs/bot.log")

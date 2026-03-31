@@ -14,6 +14,15 @@ from config import (
 )
 from logger import setup_logger
 from data_utils import get_top_volatile_symbols
+from risk_controls import (
+    can_open_new_trade,
+    emit_alert,
+    evaluate_runtime_guardrails,
+    get_open_position_symbols,
+    load_runtime_state,
+    record_trade_opened,
+    save_runtime_state,
+)
 from trading import trade_symbol
 
 
@@ -44,9 +53,18 @@ def main():
         return
 
     client = create_client(API_KEY, API_SECRET, USE_TESTNET)
+    runtime_state = load_runtime_state()
 
     while True:
         try:
+            can_trade, halt_reason, wallet_balance = evaluate_runtime_guardrails(client, runtime_state)
+            save_runtime_state(runtime_state)
+
+            if not can_trade:
+                emit_alert(halt_reason)
+                logger.warning(f"Last known wallet balance: {wallet_balance:.2f} USDT")
+                break
+
             top_symbols = get_top_volatile_symbols(
                 client,
                 top_n=TOP_N_SYMBOLS,
@@ -57,7 +75,20 @@ def main():
 
             for symbol in top_symbols:
                 try:
-                    trade_symbol(client, symbol)
+                    open_position_symbols = get_open_position_symbols(client)
+                    can_open, skip_reason = can_open_new_trade(
+                        symbol,
+                        open_position_symbols,
+                        runtime_state,
+                    )
+                    if not can_open:
+                        logger.warning(f"Skipping {symbol}: {skip_reason}")
+                        continue
+
+                    entered_position = trade_symbol(client, symbol)
+                    if entered_position:
+                        record_trade_opened(runtime_state, symbol)
+                        save_runtime_state(runtime_state)
                 except Exception as e:
                     logger.error(f"Error trading {symbol}: {e}")
 

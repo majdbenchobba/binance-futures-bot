@@ -514,23 +514,23 @@ def ensure_position_protection(client, symbol, symbol_info, position_snapshot, f
 
 def trade_symbol(client, symbol):
     if not ensure_supported_position_mode(client):
-        return
+        return False
 
     symbol_info = get_symbol_info(client, symbol)
     if not symbol_info:
         logging.error(f"Missing exchange info for {symbol}")
-        return
+        return False
 
     closes = get_klines(client, symbol, interval=ENTRY_INTERVAL)
     if closes is None:
-        return
+        return False
 
     sma_short = calculate_sma(closes, SMA_SHORT)
     sma_long = calculate_sma(closes, SMA_LONG)
 
     if sma_short is None or sma_long is None:
         logging.info(f"Not enough data to calculate SMA for {symbol}")
-        return
+        return False
 
     position_snapshot = get_position_snapshot(client, symbol)
     position = position_snapshot["amount"]
@@ -552,7 +552,7 @@ def trade_symbol(client, symbol):
                 position_snapshot,
                 fallback_price=last_price,
             )
-            return
+            return False
 
         if position_snapshot["has_position"]:
             cancel_protection_orders(client, symbol)
@@ -572,7 +572,7 @@ def trade_symbol(client, symbol):
         usdt_balance = get_available_usdt_balance(client)
         if usdt_balance <= 0:
             logging.warning("No available USDT balance for trading.")
-            return
+            return False
 
         trade_amount_usdt = usdt_balance * TRADE_BALANCE_FRACTION
         raw_quantity = trade_amount_usdt / last_price
@@ -580,21 +580,23 @@ def trade_symbol(client, symbol):
 
         if quantity <= 0:
             logging.warning(f"Calculated quantity for {symbol} is below the symbol minimum.")
-            return
+            return False
 
         if not passes_min_notional(symbol_info, quantity, last_price):
             logging.warning(f"Calculated notional for {symbol} is below Binance minimum notional.")
-            return
+            return False
 
         direction_label = "LONG" if signal_side == "BUY" else "SHORT"
         logging.info(f"Going {direction_label} on {symbol}")
         entry_order = place_order(client, symbol, signal_side, float(quantity))
         if entry_order is None:
-            return
+            return False
 
         signed_amount = float(quantity) if signal_side == "BUY" else -float(quantity)
         fill_price = get_order_fill_price(entry_order, last_price)
         place_protective_orders(client, symbol, symbol_info, signed_amount, fill_price)
+        return not DRY_RUN
 
     except Exception as e:
         logging.error(f"Error in trade_symbol for {symbol}: {e}")
+        return False

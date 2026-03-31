@@ -2,5 +2,6 @@ __pycache__/
 *.pyc
 .env
 logs/
+runtime/
 venv/
 .venv/
