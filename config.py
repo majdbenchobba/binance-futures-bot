@@ -37,5 +37,7 @@ MAX_DAILY_LOSS_PCT = float(os.getenv("MAX_DAILY_LOSS_PCT", "0.03"))
 STATE_FILE = os.getenv("STATE_FILE", "runtime/state.json")
 KILL_SWITCH_FILE = os.getenv("KILL_SWITCH_FILE", "runtime/KILL_SWITCH")
 ALERT_BELL = os.getenv("ALERT_BELL", "false").lower() == "true"
+ALERT_WEBHOOK_URL = os.getenv("ALERT_WEBHOOK_URL", "").strip()
+ALERT_TIMEOUT_SECONDS = float(os.getenv("ALERT_TIMEOUT_SECONDS", "5"))
 LOOP_SLEEP_SECONDS = int(os.getenv("LOOP_SLEEP_SECONDS", "60"))
 LOG_FILE = os.getenv("LOG_FILE", "logs/bot.log")

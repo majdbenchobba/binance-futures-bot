@@ -195,6 +195,25 @@ def get_open_algo_orders(client, symbol):
         return []
 
 
+def get_all_open_algo_orders(client):
+    try:
+        return client.futures_get_open_algo_orders(
+            algoType="CONDITIONAL",
+            recvWindow=ORDER_RECV_WINDOW,
+        )
+    except BinanceAPIException as exc:
+        logging.error(f"Error fetching all open algo orders: {exc}")
+        return []
+
+
+def get_open_protection_symbols(client):
+    return {
+        order["symbol"]
+        for order in get_all_open_algo_orders(client)
+        if is_protection_order(order)
+    }
+
+
 def _is_true(value) -> bool:
     return str(value).lower() == "true"
 
@@ -512,7 +531,31 @@ def ensure_position_protection(client, symbol, symbol_info, position_snapshot, f
         reference_price,
     )
 
-def trade_symbol(client, symbol):
+def reconcile_symbol_protection(client, symbol, fallback_price=None):
+    symbol_info = get_symbol_info(client, symbol)
+    if not symbol_info:
+        logging.error(f"Missing exchange info for {symbol}")
+        return False
+
+    position_snapshot = get_position_snapshot(client, symbol)
+    if fallback_price is None:
+        try:
+            fallback_price = float(client.futures_mark_price(symbol=symbol)["markPrice"])
+        except Exception as exc:
+            logging.error(f"Could not fetch fallback price for {symbol}: {exc}")
+            fallback_price = position_snapshot["entry_price"] or 0.0
+
+    ensure_position_protection(
+        client,
+        symbol,
+        symbol_info,
+        position_snapshot,
+        fallback_price=fallback_price,
+    )
+    return position_snapshot["has_position"]
+
+
+def trade_symbol(client, symbol, allow_new_entries=True):
     if not ensure_supported_position_mode(client):
         return False
 
@@ -539,10 +582,71 @@ def trade_symbol(client, symbol):
     set_leverage(client, symbol, LEVERAGE)
 
     try:
-        if sma_short > sma_long and position <= 0:
+        signal_side = None
+        if sma_short > sma_long:
             signal_side = "BUY"
-        elif sma_short < sma_long and position >= 0:
+        elif sma_short < sma_long:
             signal_side = "SELL"
+
+        if signal_side is None:
+            logging.info(f"No trade signal for {symbol}")
+            ensure_position_protection(
+                client,
+                symbol,
+                symbol_info,
+                position_snapshot,
+                fallback_price=last_price,
+            )
+            return False
+
+        if position_snapshot["has_position"]:
+            position_direction = get_position_direction(position)
+            signal_matches_position = (
+                (signal_side == "BUY" and position_direction == "LONG")
+                or (signal_side == "SELL" and position_direction == "SHORT")
+            )
+            if signal_matches_position:
+                logging.info(f"Holding {position_direction.lower()} position on {symbol}")
+                ensure_position_protection(
+                    client,
+                    symbol,
+                    symbol_info,
+                    position_snapshot,
+                    fallback_price=last_price,
+                )
+                return False
+
+        if not allow_new_entries and not position_snapshot["has_position"]:
+            logging.info(f"Manage-only mode for {symbol}; no live position to manage.")
+            ensure_position_protection(
+                client,
+                symbol,
+                symbol_info,
+                position_snapshot,
+                fallback_price=last_price,
+            )
+            return False
+
+        if not allow_new_entries and position_snapshot["has_position"]:
+            logging.info(f"Manage-only mode for {symbol}; closing on reversal without opening a new position.")
+            cancel_protection_orders(client, symbol)
+            close_qty = normalize_order_quantity(symbol_info, abs(position))
+            if close_qty > 0:
+                place_order(
+                    client,
+                    symbol,
+                    get_exit_side(position),
+                    float(close_qty),
+                    reduce_only=True,
+                )
+            else:
+                logging.warning(f"Existing position on {symbol} could not be normalized for closing.")
+            return False
+
+        if signal_side == "BUY" and position <= 0:
+            pass
+        elif signal_side == "SELL" and position >= 0:
+            pass
         else:
             logging.info(f"No trade signal for {symbol}")
             ensure_position_protection(

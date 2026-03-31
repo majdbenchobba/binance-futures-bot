@@ -4,7 +4,6 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from config import (
-    ALERT_BELL,
     KILL_SWITCH_FILE,
     MAX_DAILY_LOSS_PCT,
     MAX_OPEN_POSITIONS,
@@ -54,12 +53,6 @@ def save_runtime_state(state, path=STATE_FILE):
     state_path.parent.mkdir(parents=True, exist_ok=True)
     with state_path.open("w", encoding="utf-8") as handle:
         json.dump(state, handle, indent=2, sort_keys=True)
-
-
-def emit_alert(message):
-    logging.warning(message)
-    if ALERT_BELL:
-        print("\a", end="")
 
 
 def get_wallet_balance(client, asset="USDT"):
