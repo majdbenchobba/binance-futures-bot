@@ -2,11 +2,20 @@
 import numpy as np
 from binance.client import Client
 import requests
+from config import MAX_SYMBOL_SCAN, SYMBOL_ALLOWLIST
 
 def get_all_symbols(client):
     info = client.futures_exchange_info()
     # Filter for perpetual futures only
-    return [s['symbol'] for s in info['symbols'] if s['contractType'] == 'PERPETUAL']
+    symbols = [s['symbol'] for s in info['symbols'] if s['contractType'] == 'PERPETUAL']
+
+    if SYMBOL_ALLOWLIST:
+        symbols = [symbol for symbol in symbols if symbol in SYMBOL_ALLOWLIST]
+
+    if MAX_SYMBOL_SCAN > 0:
+        symbols = symbols[:MAX_SYMBOL_SCAN]
+
+    return symbols
 
 def get_volatility(client, symbol, interval='1h', lookback=24):
     try:

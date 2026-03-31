@@ -1,4 +1,5 @@
 import time
+import sys
 from binance.client import Client
 from config import (
     API_KEY,
@@ -25,6 +26,14 @@ def create_client(api_key, api_secret, use_testnet):
 
 
 def main():
+    for stream_name in ("stdout", "stderr"):
+        stream = getattr(sys, stream_name, None)
+        if stream and hasattr(stream, "reconfigure"):
+            try:
+                stream.reconfigure(encoding="utf-8", errors="replace")
+            except Exception:
+                pass
+
     logger = setup_logger()
     logger.info("Starting Binance Futures SMA crossover bot")
     if DRY_RUN:
