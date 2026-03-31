@@ -3,7 +3,9 @@ from binance.client import Client
 from config import (
     API_KEY,
     API_SECRET,
+    DRY_RUN,
     LOOP_SLEEP_SECONDS,
+    RUN_ONCE,
     TOP_N_SYMBOLS,
     USE_TESTNET,
     VOLATILITY_INTERVAL,
@@ -25,6 +27,8 @@ def create_client(api_key, api_secret, use_testnet):
 def main():
     logger = setup_logger()
     logger.info("Starting Binance Futures SMA crossover bot")
+    if DRY_RUN:
+        logger.info("Dry run mode is enabled. No live orders will be placed.")
 
     if not API_KEY or not API_SECRET:
         logger.error("Missing Binance API credentials. Add them to your .env file first.")
@@ -47,6 +51,10 @@ def main():
                     trade_symbol(client, symbol)
                 except Exception as e:
                     logger.error(f"Error trading {symbol}: {e}")
+
+            if RUN_ONCE:
+                logger.info("RUN_ONCE enabled. Exiting after a single scan cycle.")
+                break
 
             time.sleep(LOOP_SLEEP_SECONDS)
 

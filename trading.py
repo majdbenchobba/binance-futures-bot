@@ -1,6 +1,6 @@
 import numpy as np
 from binance.exceptions import BinanceAPIException
-from config import LEVERAGE, SMA_LONG, SMA_SHORT, TRADE_BALANCE_FRACTION
+from config import DRY_RUN, LEVERAGE, SMA_LONG, SMA_SHORT, TRADE_BALANCE_FRACTION
 import logging
 
 
@@ -36,6 +36,15 @@ def set_leverage(client, symbol, leverage):
         logging.error(f"Error setting leverage for {symbol}: {e}")
 
 def place_order(client, symbol, side, quantity):
+    if DRY_RUN:
+        logging.info(f"[DRY RUN] Would place {side} order for {quantity} {symbol}")
+        return {
+            "symbol": symbol,
+            "side": side,
+            "quantity": quantity,
+            "dry_run": True,
+        }
+
     try:
         order = client.futures_create_order(
             symbol=symbol,

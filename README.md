@@ -33,5 +33,7 @@ The backtest only uses public market data, so it does not need keys.
 ## Notes
 
 - default mode is testnet
+- default mode is also `DRY_RUN=true`, so it will log the orders it would place without sending them
+- set `RUN_ONCE=true` if you want a single scan/test cycle instead of a permanent loop
 - sizing logic is intentionally simple
 - if the old hardcoded keys were real, rotate them before publishing this repo

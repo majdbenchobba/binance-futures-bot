@@ -9,6 +9,8 @@ API_KEY = os.getenv("BINANCE_API_KEY", "")
 API_SECRET = os.getenv("BINANCE_API_SECRET", "")
 
 USE_TESTNET = os.getenv("USE_TESTNET", "true").lower() == "true"
+DRY_RUN = os.getenv("DRY_RUN", "true").lower() == "true"
+RUN_ONCE = os.getenv("RUN_ONCE", "false").lower() == "true"
 LEVERAGE = int(os.getenv("LEVERAGE", "20"))
 SMA_SHORT = int(os.getenv("SMA_SHORT", "7"))
 SMA_LONG = int(os.getenv("SMA_LONG", "25"))
