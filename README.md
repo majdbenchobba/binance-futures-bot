@@ -1,5 +1,7 @@
 # Binance Futures SMA Bot
 
+[![Python tests](https://github.com/majdbenchobba/binance-futures-bot/actions/workflows/tests.yml/badge.svg)](https://github.com/majdbenchobba/binance-futures-bot/actions/workflows/tests.yml)
+
 Small Binance Futures bot that scans volatile perpetual pairs and trades a basic SMA crossover.
 
 It is set up for testnet use by default and now manages a fuller trade lifecycle than the first version:
@@ -40,6 +42,25 @@ python backtest.py
 ```
 
 The backtest only uses public market data, so it does not need keys.
+
+## Tests
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+The tests use mocks and local temporary files; they do not place orders or
+require API credentials. GitHub Actions runs them on Python 3.11, 3.12, and
+3.13.
+
+## Security
+
+- use dedicated testnet keys with minimum permissions
+- never enable withdrawals
+- never commit `.env`, runtime state, journals, logs, or account exports
+- rotate a key immediately if it may have appeared in Git history
+
+See [SECURITY.md](SECURITY.md).
 
 ## Testnet dry-run check
 
