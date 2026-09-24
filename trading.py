@@ -29,6 +29,10 @@ class PositionLookupError(RuntimeError):
     """Position state is unknown; trading and order cleanup must stop."""
 
 
+class ProtectionLookupError(RuntimeError):
+    """Conditional-order state is unknown; do not assume protection is absent."""
+
+
 def _to_decimal(value) -> Decimal:
     return Decimal(str(value))
 
@@ -186,14 +190,18 @@ def get_open_orders(client, symbol):
 
 def get_open_algo_orders(client, symbol):
     try:
-        return client.futures_get_open_algo_orders(
+        orders = client.futures_get_open_algo_orders(
             symbol=symbol,
             algoType="CONDITIONAL",
             recvWindow=ORDER_RECV_WINDOW,
         )
-    except BinanceAPIException as exc:
-        logging.error(f"Error fetching open algo orders for {symbol}: {exc}")
-        return []
+        if not isinstance(orders, list) or any(not isinstance(order, dict) for order in orders):
+            raise ValueError("Expected a list of conditional orders")
+        return orders
+    except Exception as exc:
+        raise ProtectionLookupError(
+            f"Unable to verify conditional orders for {symbol}; stopping order changes."
+        ) from exc
 
 
 def get_all_open_algo_orders(client):
@@ -367,13 +375,15 @@ def build_protection_prices(symbol_info, position_amount: float, reference_price
 def set_leverage(client, symbol, leverage):
     if DRY_RUN:
         logging.info(f"[DRY RUN] Would set leverage to {leverage}x for {symbol}")
-        return
+        return True
 
     try:
         client.futures_change_leverage(symbol=symbol, leverage=leverage)
         logging.info(f"Leverage set to {leverage}x for {symbol}")
+        return True
     except BinanceAPIException as e:
         logging.error(f"Error setting leverage for {symbol}: {e}")
+        return False
 
 def place_order(
     client,
@@ -556,6 +566,53 @@ def reconcile_symbol_protection(client, symbol, fallback_price=None):
     return position_snapshot["has_position"]
 
 
+def close_position_and_confirm(client, symbol, symbol_info, position_snapshot):
+    """Keep existing protection until a filled close and a fresh flat position agree."""
+    close_qty = normalize_order_quantity(symbol_info, abs(position_snapshot["amount"]))
+    if close_qty <= 0:
+        logging.warning(f"Existing position on {symbol} could not be normalized for closing.")
+        return False
+
+    close_order = place_order(
+        client,
+        symbol,
+        get_exit_side(position_snapshot["amount"]),
+        float(close_qty),
+        reduce_only=True,
+    )
+    if close_order is None:
+        return False
+    if DRY_RUN:
+        return True
+
+    # MARKET orders requested with RESULT should return their final FILLED status.
+    # An acknowledgement or a partial fill is insufficient to start the next leg.
+    if str(close_order.get("status", "")).upper() != "FILLED":
+        logging.warning(f"Close on {symbol} is not confirmed filled; preserving protection.")
+        return False
+    confirmed = get_position_snapshot(client, symbol)
+    if confirmed["has_position"]:
+        logging.warning(f"{symbol} still has a position after the close; preserving protection.")
+        return False
+    return True
+
+
+def clear_flat_position_protection(client, symbol):
+    """Permit a new entry only after stale protective orders are confirmed absent."""
+    protective_orders = [
+        order for order in get_open_algo_orders(client, symbol) if is_protection_order(order)
+    ]
+    if cancel_algo_orders(client, symbol, protective_orders) != len(protective_orders):
+        logging.warning(f"Could not cancel all stale protective orders on {symbol}.")
+        return False
+    if not DRY_RUN and any(
+        is_protection_order(order) for order in get_open_algo_orders(client, symbol)
+    ):
+        logging.warning(f"Protective orders are still visible on {symbol}; deferring entry.")
+        return False
+    return True
+
+
 def trade_symbol(client, symbol, allow_new_entries=True):
     if not ensure_supported_position_mode(client):
         return False
@@ -579,8 +636,6 @@ def trade_symbol(client, symbol, allow_new_entries=True):
     position_snapshot = get_position_snapshot(client, symbol)
     position = position_snapshot["amount"]
     last_price = closes[-1]
-
-    set_leverage(client, symbol, LEVERAGE)
 
     try:
         signal_side = None
@@ -628,22 +683,6 @@ def trade_symbol(client, symbol, allow_new_entries=True):
             )
             return False
 
-        if not allow_new_entries and position_snapshot["has_position"]:
-            logging.info(f"Manage-only mode for {symbol}; closing on reversal without opening a new position.")
-            cancel_protection_orders(client, symbol)
-            close_qty = normalize_order_quantity(symbol_info, abs(position))
-            if close_qty > 0:
-                place_order(
-                    client,
-                    symbol,
-                    get_exit_side(position),
-                    float(close_qty),
-                    reduce_only=True,
-                )
-            else:
-                logging.warning(f"Existing position on {symbol} could not be normalized for closing.")
-            return False
-
         if signal_side == "BUY" and position <= 0:
             pass
         elif signal_side == "SELL" and position >= 0:
@@ -660,19 +699,13 @@ def trade_symbol(client, symbol, allow_new_entries=True):
             return False
 
         if position_snapshot["has_position"]:
-            cancel_protection_orders(client, symbol)
-            close_qty = normalize_order_quantity(symbol_info, abs(position))
-            if close_qty > 0:
-                logging.info(f"Closing {get_position_direction(position).lower()} position on {symbol}")
-                place_order(
-                    client,
-                    symbol,
-                    get_exit_side(position),
-                    float(close_qty),
-                    reduce_only=True,
-                )
-            else:
-                logging.warning(f"Existing position on {symbol} could not be normalized for closing.")
+            if not close_position_and_confirm(client, symbol, symbol_info, position_snapshot):
+                return False
+
+        if not clear_flat_position_protection(client, symbol):
+            return False
+        if not allow_new_entries:
+            return False
 
         usdt_balance = get_available_usdt_balance(client)
         if usdt_balance <= 0:
@@ -692,6 +725,8 @@ def trade_symbol(client, symbol, allow_new_entries=True):
             return False
 
         direction_label = "LONG" if signal_side == "BUY" else "SHORT"
+        if not set_leverage(client, symbol, LEVERAGE):
+            return False
         logging.info(f"Going {direction_label} on {symbol}")
         entry_order = place_order(client, symbol, signal_side, float(quantity))
         if entry_order is None:
