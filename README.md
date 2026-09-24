@@ -95,6 +95,10 @@ On a filled short, it mirrors those levels above and below entry.
 
 If a position exists but the matching protection orders are missing, the bot will recreate them on the next loop.
 
+If the position lookup fails or returns an incomplete response, the bot stops
+processing that symbol and preserves existing orders. Only a verified flat
+position permits cleanup of orphan protective orders.
+
 ## Operator safety settings
 
 These controls are aimed at keeping the bot from blindly stacking trades:

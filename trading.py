@@ -1,4 +1,5 @@
 import logging
+import math
 from decimal import Decimal, ROUND_DOWN, ROUND_UP
 from time import time
 
@@ -22,6 +23,10 @@ from config import (
 
 _SYMBOL_INFO_CACHE = {}
 PROTECTION_ORDER_TYPES = {"STOP_MARKET", "TAKE_PROFIT_MARKET"}
+
+
+class PositionLookupError(RuntimeError):
+    """Position state is unknown; trading and order cleanup must stop."""
 
 
 def _to_decimal(value) -> Decimal:
@@ -142,33 +147,29 @@ def calculate_sma(prices, period):
     return np.mean(prices[-period:])
 
 def get_position_snapshot(client, symbol):
-    snapshot = {
-        "symbol": symbol,
-        "amount": 0.0,
-        "entry_price": 0.0,
-        "position_side": "BOTH",
-        "has_position": False,
-    }
-
     try:
         positions = client.futures_position_information(symbol=symbol)
         for pos in positions:
-            if pos["symbol"] != symbol:
+            if pos.get("symbol") != symbol:
                 continue
 
-            amount = float(pos.get("positionAmt") or 0.0)
-            snapshot.update(
-                {
-                    "amount": amount,
-                    "entry_price": float(pos.get("entryPrice") or 0.0),
-                    "position_side": pos.get("positionSide") or "BOTH",
-                    "has_position": abs(amount) > 0.0,
-                }
-            )
-            return snapshot
-    except BinanceAPIException as e:
-        logging.error(f"Error fetching position for {symbol}: {e}")
-    return snapshot
+            amount = float(pos["positionAmt"])
+            entry_price = float(pos.get("entryPrice") or 0.0)
+            if not math.isfinite(amount) or not math.isfinite(entry_price):
+                raise ValueError("Position response contains a non-finite value")
+
+            return {
+                "symbol": symbol,
+                "amount": amount,
+                "entry_price": entry_price,
+                "position_side": pos.get("positionSide") or "BOTH",
+                "has_position": abs(amount) > 0.0,
+            }
+        raise ValueError("No position record returned for the requested symbol")
+    except Exception as exc:
+        raise PositionLookupError(
+            f"Unable to verify position for {symbol}; preserving existing orders."
+        ) from exc
 
 
 def get_position(client, symbol):
