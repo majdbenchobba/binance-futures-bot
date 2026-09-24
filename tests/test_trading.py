@@ -2,16 +2,21 @@ import sys
 import unittest
 from decimal import ROUND_UP
 from pathlib import Path
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from trading import (
+    PositionLookupError,
     build_protection_prices,
+    get_position_snapshot,
     has_expected_protection_orders,
     normalize_order_quantity,
     normalize_trigger_price,
     passes_min_notional,
     quantize_quantity,
+    reconcile_symbol_protection,
+    trade_symbol,
 )
 
 
@@ -59,6 +64,101 @@ class TradingHelpersTest(unittest.TestCase):
         ]
         self.assertTrue(has_expected_protection_orders(open_orders, "SELL"))
         self.assertFalse(has_expected_protection_orders(open_orders, "BUY"))
+
+
+class PositionLookupSafetyTest(unittest.TestCase):
+    def setUp(self):
+        self.client = Mock()
+        self.client.futures_get_position_mode.return_value = {"dualSidePosition": False}
+        self.client.futures_get_open_algo_orders.return_value = [
+            {
+                "symbol": "BTCUSDT",
+                "algoId": 101,
+                "orderType": "STOP_MARKET",
+                "side": "SELL",
+                "closePosition": True,
+            },
+            {
+                "symbol": "BTCUSDT",
+                "algoId": 102,
+                "orderType": "TAKE_PROFIT_MARKET",
+                "side": "SELL",
+                "closePosition": True,
+            },
+        ]
+
+    def assert_orders_untouched(self):
+        self.client.futures_cancel_algo_order.assert_not_called()
+        self.client.futures_cancel_order.assert_not_called()
+        self.client.futures_create_algo_order.assert_not_called()
+        self.client.futures_create_order.assert_not_called()
+        self.client.futures_change_leverage.assert_not_called()
+
+    def test_position_lookup_failure_preserves_protection_during_reconciliation(self):
+        self.client.futures_position_information.side_effect = TimeoutError("Lookup failed")
+        with patch("trading.DRY_RUN", False), patch(
+            "trading.get_symbol_info", return_value={"symbol": "BTCUSDT"}
+        ):
+            with self.assertRaises(PositionLookupError):
+                reconcile_symbol_protection(self.client, "BTCUSDT", fallback_price=100.0)
+        self.assert_orders_untouched()
+
+    def test_exchange_api_error_cannot_cancel_protection_or_open_a_trade(self):
+        from binance.exceptions import BinanceAPIException
+
+        self.client.futures_position_information.side_effect = BinanceAPIException(
+            None, 503, '{"code": -1001, "msg": "Disconnected"}'
+        )
+        with patch("trading.DRY_RUN", False), patch(
+            "trading.get_symbol_info", return_value={"symbol": "BTCUSDT"}
+        ), patch("trading.get_klines", return_value=list(range(1, 101))):
+            with self.assertRaises(PositionLookupError):
+                trade_symbol(self.client, "BTCUSDT")
+        self.assert_orders_untouched()
+
+    def test_missing_or_invalid_position_records_are_unknown(self):
+        responses = [
+            [],
+            [{"symbol": "ETHUSDT", "positionAmt": "0"}],
+            [{"symbol": "BTCUSDT"}],
+            [{"symbol": "BTCUSDT", "positionAmt": ""}],
+            [{"symbol": "BTCUSDT", "positionAmt": "nan"}],
+            [{"symbol": "BTCUSDT", "positionAmt": "inf"}],
+        ]
+        for response in responses:
+            with self.subTest(response=response):
+                self.client.futures_position_information.return_value = response
+                with self.assertRaises(PositionLookupError):
+                    get_position_snapshot(self.client, "BTCUSDT")
+        self.assert_orders_untouched()
+
+    def test_confirmed_flat_position_can_still_clean_up_orphan_orders(self):
+        self.client.futures_position_information.return_value = [
+            {"symbol": "BTCUSDT", "positionAmt": "0", "entryPrice": "0"}
+        ]
+        with patch("trading.DRY_RUN", False), patch(
+            "trading.get_symbol_info", return_value={"symbol": "BTCUSDT"}
+        ):
+            self.assertFalse(
+                reconcile_symbol_protection(self.client, "BTCUSDT", fallback_price=100.0)
+            )
+        self.assertEqual(
+            [call.kwargs["algoId"] for call in self.client.futures_cancel_algo_order.call_args_list],
+            [101, 102],
+        )
+        self.client.futures_create_order.assert_not_called()
+
+    def test_confirmed_open_position_keeps_matching_protective_orders(self):
+        self.client.futures_position_information.return_value = [
+            {"symbol": "BTCUSDT", "positionAmt": "0.01", "entryPrice": "100"}
+        ]
+        with patch("trading.DRY_RUN", False), patch(
+            "trading.get_symbol_info", return_value={"symbol": "BTCUSDT"}
+        ):
+            self.assertTrue(
+                reconcile_symbol_protection(self.client, "BTCUSDT", fallback_price=100.0)
+            )
+        self.assert_orders_untouched()
 
 
 if __name__ == "__main__":
