@@ -99,6 +99,13 @@ If the position lookup fails or returns an incomplete response, the bot stops
 processing that symbol and preserves existing orders. Only a verified flat
 position permits cleanup of orphan protective orders.
 
+On a reversal, the current protective orders stay in place while a reduce-only
+market close is attempted. The bot requires a `FILLED` response and a fresh
+flat-position reading before removing stale protection and opening the next
+leg. Rejected, pending, partially filled, or unconfirmed closes defer the
+reversal to a later cycle. Order-list and cancellation failures also prevent
+the next entry. Manage-only mode uses the same close-confirmation checks.
+
 ## Operator safety settings
 
 These controls are aimed at keeping the bot from blindly stacking trades:
